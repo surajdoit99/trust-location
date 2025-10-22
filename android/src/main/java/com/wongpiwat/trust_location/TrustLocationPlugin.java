@@ -13,7 +13,6 @@ import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
-import io.flutter.plugin.common.PluginRegistry;
 
 /** TrustLocationPlugin */
 public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, ActivityAware {
@@ -26,19 +25,6 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
     public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
         channel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), CHANNEL);
         channel.setMethodCallHandler(this);
-    }
-
-    // This static function is optional and equivalent to onAttachedToEngine. It supports the old
-    // pre-Flutter-1.12 Android projects.
-    @SuppressWarnings("deprecation")
-    public static void registerWith(PluginRegistry.Registrar registrar) {
-        final MethodChannel channel = new MethodChannel(registrar.messenger(), CHANNEL);
-        TrustLocationPlugin plugin = new TrustLocationPlugin();
-        channel.setMethodCallHandler(plugin);
-        
-        if (registrar.activity() != null) {
-            plugin.locationAssistantListener = new LocationAssistantListener(registrar.activity(), registrar.activeContext());
-        }
     }
 
     @Override
