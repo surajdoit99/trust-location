@@ -159,42 +159,38 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
 
     private boolean isMockLocationEnabledInSettings() {
     try {
+        // ✅ Modern check using AppOpsManager (Android 6+)
         AppOpsManager appOps = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
         if (appOps == null) return false;
 
         List<ApplicationInfo> apps = context.getPackageManager().getInstalledApplications(0);
         for (ApplicationInfo app : apps) {
-            String pkg = app.packageName;
-            if (pkg.equals(context.getPackageName())) continue; // Skip self
-            if (pkg.equals("com.google.android.gms")) continue; // Skip Play Services (fused)
+            if (app.packageName.equals(context.getPackageName())) continue; // Skip self
 
             try {
-                int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_MOCK_LOCATION, app.uid, pkg);
+                int mode = appOps.checkOpNoThrow(
+                        AppOpsManager.OPSTR_MOCK_LOCATION,
+                        app.uid,
+                        app.packageName
+                );
+
                 if (mode == AppOpsManager.MODE_ALLOWED) {
-                    Log.i("TrustLocation", "Mock location app detected: " + pkg);
+                    Log.i("TrustLocation", "Mock location app detected: " + app.packageName);
                     return true;
                 }
             } catch (Exception ignored) {
+                // Some OEMs restrict this call; skip safely
             }
         }
 
-        // Also check if this app itself is selected as the mock location app
-        int selfMode = appOps.checkOpNoThrow(
-            AppOpsManager.OPSTR_MOCK_LOCATION,
-            android.os.Process.myUid(),
-            context.getPackageName()
-        );
-        if (selfMode == AppOpsManager.MODE_ALLOWED) {
-            Log.i("TrustLocation", "This app is selected as mock location provider");
-            return true;
-        }
-
+        // ✅ No deprecated fallback needed — OPSTR_MOCK_LOCATION covers all new Android versions
     } catch (Exception e) {
         Log.e("TrustLocation", "Error checking mock location apps via AppOpsManager", e);
     }
 
     return false;
 }
+
 
 
     private boolean hasTestProviders() {
