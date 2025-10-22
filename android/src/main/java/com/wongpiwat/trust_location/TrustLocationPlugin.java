@@ -8,6 +8,8 @@ import android.location.LocationManager;
 import android.os.Build;
 import android.provider.Settings;
 import android.util.Log;
+import android.app.AppOpsManager;
+import android.content.pm.ApplicationInfo;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -156,39 +158,31 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
     }
 
     private boolean isMockLocationEnabledInSettings() {
-        try {
-            // For Android M to P (6.0 - 9.0)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-                @SuppressWarnings("deprecation")
-                String mockLocationApp = Settings.Secure.getString(
-                    context.getContentResolver(), 
-                    Settings.Secure.ALLOW_MOCK_LOCATION
-                );
-                
-                // If a mock location app is selected and it's not "0", mock location is enabled
-                if (mockLocationApp != null && !mockLocationApp.isEmpty() && !"0".equals(mockLocationApp)) {
-                    Log.i("TrustLocation", "Mock location app in settings: " + mockLocationApp);
+    try {
+        // Use AppOpsManager (valid from Android 6+)
+        AppOpsManager appOps = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
+        if (appOps == null) return false;
+
+        List<ApplicationInfo> apps = context.getPackageManager().getInstalledApplications(0);
+        for (ApplicationInfo app : apps) {
+            if (app.packageName.equals(context.getPackageName())) continue; // Skip self
+
+            try {
+                int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_MOCK_LOCATION, app.uid, app.packageName);
+                if (mode == AppOpsManager.MODE_ALLOWED) {
+                    Log.i("TrustLocation", "Mock location app detected: " + app.packageName);
                     return true;
                 }
+            } catch (Exception ignored) {
             }
-            
-            // For all versions, also check the newer setting
-            @SuppressWarnings("deprecation")
-            String mockLocationValue = Settings.Secure.getString(
-                context.getContentResolver(),
-                Settings.Secure.ALLOW_MOCK_LOCATION
-            );
-            
-            if (mockLocationValue != null && !mockLocationValue.isEmpty() && !"0".equals(mockLocationValue)) {
-                Log.i("TrustLocation", "Mock location setting value: " + mockLocationValue);
-                return true;
-            }
-            
-        } catch (Exception e) {
-            Log.e("TrustLocation", "Error checking mock location settings", e);
         }
-        return false;
+    } catch (Exception e) {
+        Log.e("TrustLocation", "Error checking mock location apps via AppOpsManager", e);
     }
+
+    return false;
+}
+
 
     private boolean hasTestProviders() {
         try {
