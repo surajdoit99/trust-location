@@ -4,26 +4,26 @@ version '2.0.14'
 buildscript {
     repositories {
         google()
-        mavenCentral()  // Replaced jcenter()
+        mavenCentral()
     }
 
     dependencies {
-        classpath 'com.android.tools.build:gradle:7.3.0'  // Updated from 3.5.2
+        classpath 'com.android.tools.build:gradle:7.3.0'
     }
 }
 
 rootProject.allprojects {
     repositories {
         google()
-        mavenCentral()  // Replaced jcenter()
+        mavenCentral()
     }
 }
 
 apply plugin: 'com.android.library'
 
 android {
-    compileSdkVersion 33  // Updated from 29
-    namespace 'com.wongpiwat.trust_location'  // ADD THIS REQUIRED LINE
+    compileSdkVersion 33
+    namespace 'com.wongpiwat.trust_location'
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
@@ -40,11 +40,11 @@ android {
 }
 
 dependencies {
-    testImplementation 'junit:junit:4.13.2'  // Updated from 4.12
-    androidTestImplementation 'androidx.test:runner:1.4.0'  // Updated from 1.3.0
-    androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'  // Updated from 3.3.0
-    implementation 'androidx.appcompat:appcompat:1.6.1'  // Updated from 1.3.0
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test:runner:1.4.0'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.legacy:legacy-support-v13:1.0.0'
-    implementation "androidx.annotation:annotation:1.6.0"  // Updated from 1.2.0
-    implementation 'com.google.android.gms:play-services-location:21.0.1'  // Updated from 18.0.0
+    implementation "androidx.annotation:annotation:1.6.0"
+    implementation 'com.google.android.gms:play-services-location:21.0.1'
 }
