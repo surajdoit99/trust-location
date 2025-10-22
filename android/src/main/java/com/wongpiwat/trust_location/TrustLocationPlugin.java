@@ -3,6 +3,7 @@ package com.wongpiwat.trust_location;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.location.Location;
 import android.location.LocationManager;
 import android.os.Build;
 import android.provider.Settings;
@@ -10,6 +11,8 @@ import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
+
+import java.util.List;
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.embedding.engine.plugins.activity.ActivityAware;
@@ -84,6 +87,7 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
     private void handleIsMockLocation(@NonNull Result result) {
         try {
             boolean isMock = detectMockLocation();
+            Log.i("TrustLocation", "Mock location detection result: " + isMock);
             result.success(isMock);
         } catch (Exception e) {
             Log.e("TrustLocation", "Error detecting mock location", e);
@@ -121,59 +125,176 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
     }
 
     private boolean detectMockLocation() {
-        // Method 1: Check for common virtual/emulator indicators
-        if (isDeviceSuspectForMockLocation()) {
+        Log.i("TrustLocation", "Starting mock location detection...");
+        
+        // Method 1: Check if mock location is enabled in developer options
+        if (isMockLocationEnabledInSettings()) {
+            Log.i("TrustLocation", "Mock location enabled in developer settings");
             return true;
         }
 
-        // Method 2: Check developer settings for mock location (Android 6.0-9.0)
-        // Note: ALLOW_MOCK_LOCATION was deprecated in API 23 but still works up to Android 9
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            try {
-                // This is the deprecated API causing the warning
+        // Method 2: Check for test providers (more reliable indicator)
+        if (hasTestProviders()) {
+            Log.i("TrustLocation", "Test providers detected");
+            return true;
+        }
+
+        // Method 3: Check last known locations for mock indicators
+        if (hasMockLocationsFromProviders()) {
+            Log.i("TrustLocation", "Mock locations detected from providers");
+            return true;
+        }
+
+        // Method 4: Check for virtual/emulator environment
+        if (isDeviceSuspectForMockLocation()) {
+            Log.i("TrustLocation", "Device is suspect for mock location");
+            return true;
+        }
+
+        Log.i("TrustLocation", "No mock location detected");
+        return false;
+    }
+
+    private boolean isMockLocationEnabledInSettings() {
+        try {
+            // For Android M to P (6.0 - 9.0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
                 @SuppressWarnings("deprecation")
                 String mockLocationApp = Settings.Secure.getString(
                     context.getContentResolver(), 
                     Settings.Secure.ALLOW_MOCK_LOCATION
                 );
                 
-                // If a mock location app is selected, mock location is enabled
+                // If a mock location app is selected and it's not "0", mock location is enabled
                 if (mockLocationApp != null && !mockLocationApp.isEmpty() && !"0".equals(mockLocationApp)) {
-                    Log.i("TrustLocation", "Mock location app detected: " + mockLocationApp);
+                    Log.i("TrustLocation", "Mock location app in settings: " + mockLocationApp);
                     return true;
                 }
-            } catch (Exception e) {
-                Log.e("TrustLocation", "Error checking mock location settings", e);
             }
+            
+            // For all versions, also check the newer setting
+            @SuppressWarnings("deprecation")
+            String mockLocationValue = Settings.Secure.getString(
+                context.getContentResolver(),
+                Settings.Secure.ALLOW_MOCK_LOCATION
+            );
+            
+            if (mockLocationValue != null && !mockLocationValue.isEmpty() && !"0".equals(mockLocationValue)) {
+                Log.i("TrustLocation", "Mock location setting value: " + mockLocationValue);
+                return true;
+            }
+            
+        } catch (Exception e) {
+            Log.e("TrustLocation", "Error checking mock location settings", e);
         }
-
-        // Method 3: For Android 10+, we rely more on device fingerprinting
-        // since ALLOW_MOCK_LOCATION is more restricted
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Additional checks for Android 10+ devices
-            return isAndroid10PlusMockDetected();
-        }
-
         return false;
     }
 
-    private boolean isAndroid10PlusMockDetected() {
-        // On Android 10+, we can't reliably detect mock location via settings
-        // So we rely more on device fingerprinting and behavior analysis
+    private boolean hasTestProviders() {
         try {
             LocationManager locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
-            if (locationManager != null) {
-                // Check if any test providers are added (less reliable but still useful)
-                for (String provider : locationManager.getAllProviders()) {
-                    if (provider.contains("test") || provider.contains("mock")) {
-                        return true;
-                    }
+            if (locationManager == null) {
+                return false;
+            }
+
+            // Check for test providers in the list of all providers
+            List<String> allProviders = locationManager.getAllProviders();
+            for (String provider : allProviders) {
+                if (provider.toLowerCase().contains("test") || 
+                    provider.toLowerCase().contains("mock") ||
+                    provider.equals("fused") || // Some mock apps use "fused" provider
+                    provider.contains("gps") && provider.length() > 3) { // Modified GPS providers
+                    Log.i("TrustLocation", "Suspicious provider found: " + provider);
+                    return true;
                 }
             }
+
+            // Check if test provider can be added (indicates mock location capability)
+            try {
+                // This will throw SecurityException if mock locations are not allowed
+                locationManager.addTestProvider("test_provider_check", false, false, false, false, true, true, true, 0, 5);
+                locationManager.removeTestProvider("test_provider_check");
+                Log.i("TrustLocation", "Test provider can be added - mock location likely enabled");
+                return true;
+            } catch (SecurityException e) {
+                // SecurityException means mock locations are not allowed - this is good
+                Log.i("TrustLocation", "Cannot add test provider - mock location likely disabled");
+            } catch (Exception e) {
+                Log.e("TrustLocation", "Error testing provider addition", e);
+            }
+
         } catch (Exception e) {
-            Log.e("TrustLocation", "Error checking Android 10+ mock location", e);
+            Log.e("TrustLocation", "Error checking test providers", e);
         }
-        
+        return false;
+    }
+
+    private boolean hasMockLocationsFromProviders() {
+        try {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) 
+                    != PackageManager.PERMISSION_GRANTED) {
+                Log.i("TrustLocation", "No location permission, skipping location-based mock detection");
+                return false;
+            }
+
+            LocationManager locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
+            if (locationManager == null) {
+                return false;
+            }
+
+            // Check last known locations from different providers
+            String[] providers = {LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER};
+            
+            for (String provider : providers) {
+                try {
+                    Location location = locationManager.getLastKnownLocation(provider);
+                    if (location != null) {
+                        // Check if location is from mock provider (API 18+)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+                            if (location.isFromMockProvider()) {
+                                Log.i("TrustLocation", "Mock location detected from provider: " + provider);
+                                return true;
+                            }
+                        }
+                        
+                        // Additional checks for suspicious locations
+                        if (isSuspiciousLocation(location)) {
+                            Log.i("TrustLocation", "Suspicious location from provider: " + provider);
+                            return true;
+                        }
+                    }
+                } catch (SecurityException e) {
+                    Log.w("TrustLocation", "No permission to access location from provider: " + provider);
+                } catch (Exception e) {
+                    Log.e("TrustLocation", "Error checking location from provider: " + provider, e);
+                }
+            }
+
+        } catch (Exception e) {
+            Log.e("TrustLocation", "Error checking locations from providers", e);
+        }
+        return false;
+    }
+
+    private boolean isSuspiciousLocation(Location location) {
+        if (location == null) return false;
+
+        // Check for 0,0 coordinates (common in mock locations)
+        if (location.getLatitude() == 0.0 && location.getLongitude() == 0.0) {
+            return true;
+        }
+
+        // Check for impossible accuracy values
+        if (location.hasAccuracy() && (location.getAccuracy() < 0 || location.getAccuracy() > 100000)) {
+            return true;
+        }
+
+        // Check for very old timestamps (older than 1 hour)
+        long locationAge = System.currentTimeMillis() - location.getTime();
+        if (locationAge > 3600000) { // 1 hour in milliseconds
+            return true;
+        }
+
         return false;
     }
 
@@ -184,6 +305,7 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
         String brand = Build.BRAND.toLowerCase();
         String fingerprint = Build.FINGERPRINT.toLowerCase();
         String product = Build.PRODUCT.toLowerCase();
+        String device = Build.DEVICE.toLowerCase();
 
         // Extended list of virtual environment indicators
         String[] virtualIndicators = {
@@ -191,8 +313,7 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
             "virtual", "emulator", "genymotion", "bluestacks", "nox",
             "memu", "ldplayer", "andy", "simulator", "x86", "android sdk",
             "sdk_google", "google_sdk", "droid4x", "vbox", "virtualbox",
-            "vmware", "qemu", "parallel space", "multi", "island", "shelter",
-            "test", "generic"
+            "vmware", "qemu", "parallel space", "multi", "island", "shelter"
         };
 
         for (String indicator : virtualIndicators) {
@@ -200,15 +321,17 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
                 manufacturer.contains(indicator) || 
                 brand.contains(indicator) ||
                 fingerprint.contains(indicator) ||
-                product.contains(indicator)) {
-                Log.i("TrustLocation", "Virtual environment detected: " + indicator);
+                product.contains(indicator) ||
+                device.contains(indicator)) {
+                Log.i("TrustLocation", "Virtual environment indicator: " + indicator);
                 return true;
             }
         }
 
         // Check for specific emulator patterns
         if (Build.FINGERPRINT.startsWith("generic") ||
-            Build.FINGERPRINT.startsWith("unknown") ||
+            Build.FINGERPRINT.contains("vbox") ||
+            Build.FINGERPRINT.contains("test-keys") ||
             Build.MODEL.contains("google_sdk") ||
             Build.MODEL.contains("Emulator") ||
             Build.MODEL.contains("Android SDK") ||
@@ -216,7 +339,11 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
             Build.BRAND.startsWith("generic") ||
             Build.DEVICE.startsWith("generic") ||
             Build.PRODUCT.startsWith("sdk") ||
-            Build.PRODUCT.startsWith("vbox")) {
+            Build.PRODUCT.startsWith("vbox86t") ||
+            Build.HARDWARE.contains("goldfish") ||
+            Build.HARDWARE.contains("vbox") ||
+            Build.HARDWARE.contains("ranchu")) {
+            Log.i("TrustLocation", "Emulator pattern detected");
             return true;
         }
 
