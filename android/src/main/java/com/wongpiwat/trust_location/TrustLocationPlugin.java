@@ -1,45 +1,38 @@
 package com.wongpiwat.trust_location;
 
-import android.content.Context;
-import android.content.DialogInterface;
-import android.location.Location;
-import android.view.View;
-
 import androidx.annotation.NonNull;
-
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
-import io.flutter.app.FlutterActivity;
+import io.flutter.embedding.engine.plugins.activity.ActivityAware;
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
+import io.flutter.plugin.common.PluginRegistry.Registrar;
 
-/**
- * TrustLocationPlugin
- */
-public class TrustLocationPlugin extends FlutterActivity implements FlutterPlugin, MethodCallHandler {
+/** TrustLocationPlugin */
+public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, ActivityAware {
     private static final String CHANNEL = "trust_location";
-    private static LocationAssistantListener locationAssistantListener;
-    private static Context context;
+    private LocationAssistantListener locationAssistantListener;
     private MethodChannel channel;
-
-    public TrustLocationPlugin() {
-    }
-
-    @SuppressWarnings("deprecation")
-    public static void registerWith(Registrar registrar) {
-        final MethodChannel channel = new MethodChannel(registrar.messenger(), CHANNEL);
-        channel.setMethodCallHandler(new TrustLocationPlugin());
-        context = registrar.context();
-        locationAssistantListener = new LocationAssistantListener(context);
-    }
+    private ActivityPluginBinding activityBinding;
 
     @Override
     public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
         channel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), CHANNEL);
-        channel.setMethodCallHandler(new TrustLocationPlugin());
-        context = flutterPluginBinding.getApplicationContext();
-        locationAssistantListener = new LocationAssistantListener(context);
+        channel.setMethodCallHandler(this);
+    }
+
+    // This static function is optional and equivalent to onAttachedToEngine. It supports the old
+    // pre-Flutter-1.12 Android projects.
+    public static void registerWith(Registrar registrar) {
+        final MethodChannel channel = new MethodChannel(registrar.messenger(), CHANNEL);
+        TrustLocationPlugin plugin = new TrustLocationPlugin();
+        channel.setMethodCallHandler(plugin);
+        
+        if (registrar.activity() != null) {
+            plugin.locationAssistantListener = new LocationAssistantListener(registrar.activity(), registrar.activeContext());
+        }
     }
 
     @Override
@@ -48,7 +41,46 @@ public class TrustLocationPlugin extends FlutterActivity implements FlutterPlugi
     }
 
     @Override
+    public void onAttachedToActivity(@NonNull ActivityPluginBinding binding) {
+        this.activityBinding = binding;
+        this.locationAssistantListener = new LocationAssistantListener(binding.getActivity(), binding.getActivity().getApplicationContext());
+        
+        // Add permission result listener
+        binding.addRequestPermissionsResultListener((requestCode, permissions, grantResults) -> {
+            if (locationAssistantListener != null && locationAssistantListener.getAssistant() != null) {
+                return locationAssistantListener.getAssistant().onPermissionsUpdated(requestCode, grantResults);
+            }
+            return false;
+        });
+    }
+
+    @Override
+    public void onDetachedFromActivityForConfigChanges() {
+        onDetachedFromActivity();
+    }
+
+    @Override
+    public void onReattachedToActivityForConfigChanges(@NonNull ActivityPluginBinding binding) {
+        onAttachedToActivity(binding);
+    }
+
+    @Override
+    public void onDetachedFromActivity() {
+        if (locationAssistantListener != null && locationAssistantListener.getAssistant() != null) {
+            locationAssistantListener.getAssistant().stop();
+        }
+        if (activityBinding != null) {
+            activityBinding.removeRequestPermissionsResultListener((requestCode, permissions, grantResults) -> false);
+        }
+    }
+
+    @Override
     public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
+        if (locationAssistantListener == null) {
+            result.error("UNAVAILABLE", "Location assistant not initialized", null);
+            return;
+        }
+
         switch (call.method) {
             case "isMockLocation":
                 if (locationAssistantListener.isMockLocationsDetected()) {
@@ -56,7 +88,6 @@ public class TrustLocationPlugin extends FlutterActivity implements FlutterPlugi
                 } else if (locationAssistantListener.getLatitude() != null && locationAssistantListener.getLongitude() != null) {
                     result.success(false);
                 } else {
-                    locationAssistantListener = new LocationAssistantListener(context);
                     result.success(true);
                 }
                 break;
@@ -64,7 +95,6 @@ public class TrustLocationPlugin extends FlutterActivity implements FlutterPlugi
                 if (locationAssistantListener.getLatitude() != null) {
                     result.success(locationAssistantListener.getLatitude());
                 } else {
-                    locationAssistantListener = new LocationAssistantListener(context);
                     result.success(null);
                 }
                 break;
@@ -72,31 +102,16 @@ public class TrustLocationPlugin extends FlutterActivity implements FlutterPlugi
                 if (locationAssistantListener.getLongitude() != null) {
                     result.success(locationAssistantListener.getLongitude());
                 } else {
-                    locationAssistantListener = new LocationAssistantListener(context);
                     result.success(null);
                 }
+                break;
+            case "getPlatformVersion":
+                result.success("Android " + android.os.Build.VERSION.RELEASE);
                 break;
             default:
                 result.notImplemented();
                 break;
         }
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        locationAssistantListener.getAssistant().start();
-    }
-
-    @Override
-    protected void onPause() {
-        locationAssistantListener.getAssistant().stop();
-        super.onPause();
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        locationAssistantListener.getAssistant().onPermissionsUpdated(requestCode, grantResults);//io.flutter.Log.i("i", "requestCode: " + requestCode);
     }
 }
 
@@ -106,43 +121,44 @@ class LocationAssistantListener implements LocationAssistant.Listener {
     private String latitude;
     private String longitude;
 
-    public LocationAssistantListener(Context context) {
-        assistant = new LocationAssistant(context, this, LocationAssistant.Accuracy.HIGH, 5000, false);
+    public LocationAssistantListener(android.app.Activity activity, Context context) {
+        assistant = new LocationAssistant(activity, context, this, LocationAssistant.Accuracy.HIGH, 5000, false);
         assistant.setVerbose(true);
         assistant.start();
     }
 
     @Override
     public void onNeedLocationPermission() {
-        assistant.requestLocationPermission();
-        assistant.requestAndPossiblyExplainLocationPermission();
+        if (assistant != null) {
+            assistant.requestAndPossiblyExplainLocationPermission();
+        }
     }
 
     @Override
     public void onExplainLocationPermission() {
-        io.flutter.Log.i("i", "onExplainLocationPermission: ");
+        android.util.Log.i("TrustLocation", "onExplainLocationPermission: ");
     }
 
     @Override
     public void onLocationPermissionPermanentlyDeclined(View.OnClickListener fromView, DialogInterface.OnClickListener fromDialog) {
-        io.flutter.Log.i("i", "onLocationPermissionPermanentlyDeclined: ");
+        android.util.Log.i("TrustLocation", "onLocationPermissionPermanentlyDeclined: ");
     }
 
     @Override
     public void onNeedLocationSettingsChange() {
-        io.flutter.Log.i("i", "LocationSettingsStatusCodes.RESOLUTION_REQUIRED: Please Turn on GPS location service.");
+        android.util.Log.i("TrustLocation", "LocationSettingsStatusCodes.RESOLUTION_REQUIRED: Please Turn on GPS location service.");
     }
 
     @Override
     public void onFallBackToSystemSettings(View.OnClickListener fromView, DialogInterface.OnClickListener fromDialog) {
-        io.flutter.Log.i("i", "onFallBackToSystemSettings: ");
+        android.util.Log.i("TrustLocation", "onFallBackToSystemSettings: ");
     }
 
     @Override
-    public void onNewLocationAvailable(Location location) {
+    public void onNewLocationAvailable(android.location.Location location) {
         if (location == null) return;
-        latitude = location.getLatitude() + "";
-        longitude = location.getLongitude() + "";
+        latitude = String.valueOf(location.getLatitude());
+        longitude = String.valueOf(location.getLongitude());
         isMockLocationsDetected = false;
     }
 
@@ -153,7 +169,7 @@ class LocationAssistantListener implements LocationAssistant.Listener {
 
     @Override
     public void onError(LocationAssistant.ErrorType type, String message) {
-        io.flutter.Log.i("i", "Error: " + message);
+        android.util.Log.i("TrustLocation", "Error: " + message);
     }
 
     public String getLatitude() {
