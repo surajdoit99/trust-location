@@ -1,23 +1,7 @@
-// https://github.com/klaasnotfound/LocationAssistant
-/*
- *    Copyright 2017 Klaas Klasing (klaas [at] klaasnotfound.com)
- *
- *    Licensed under the Apache License, Version 2.0 (the "License");
- *    you may not use this file except in compliance with the License.
- *    You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- *    Unless required by applicable law or agreed to in writing, software
- *    distributed under the License is distributed on an "AS IS" BASIS,
- *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *    See the License for the specific language governing permissions and
- *    limitations under the License.
- */
-
 package com.wongpiwat.trust_location;
 
 import android.Manifest;
+import android.app.Activity;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -178,7 +162,7 @@ public class LocationAssistant
 
     // Parameters
     private final Context context;
-    private AppCompatActivity activity;
+    private Activity activity;
     private Listener listener;
     private final int priority;
     private final long updateInterval;
@@ -206,17 +190,17 @@ public class LocationAssistant
     /**
      * Constructs a LocationAssistant instance that will listen for valid location updates.
      *
+     * @param activity           the activity that wants to receive location updates
      * @param context            the context of the application or activity that wants to receive location updates
      * @param listener           a listener that will receive location-related events
      * @param accuracy           the desired accuracy of the loation updates
      * @param updateInterval     the interval (in milliseconds) at which the activity can process updates
      * @param allowMockLocations whether or not mock locations are acceptable
      */
-    public LocationAssistant(final Context context, Listener listener, Accuracy accuracy, long updateInterval,
+    public LocationAssistant(final Activity activity, final Context context, Listener listener, Accuracy accuracy, long updateInterval,
                              boolean allowMockLocations) {
+        this.activity = activity;
         this.context = context;
-        if (context instanceof AppCompatActivity)
-            this.activity = (AppCompatActivity) context;
         this.listener = listener;
         switch (accuracy) {
             case HIGH:
@@ -281,7 +265,7 @@ public class LocationAssistant
      * @param activity the activity that wants to receive location updates
      * @param listener a listener that will receive location-related events
      */
-    public void register(AppCompatActivity activity, Listener listener) {
+    public void register(Activity activity, Listener listener) {
         this.activity = activity;
         this.listener = listener;
         checkInitialLocation();
@@ -405,7 +389,7 @@ public class LocationAssistant
      */
     public void onActivityResult(int requestCode, int resultCode) {
         if (requestCode != REQUEST_CHECK_SETTINGS) return;
-        if (resultCode == AppCompatActivity.RESULT_OK) {
+        if (resultCode == Activity.RESULT_OK) {
             changeSettings = false;
             locationStatusOk = true;
         }
@@ -692,7 +676,7 @@ public class LocationAssistant
         if (location == null) return;
         boolean plausible = isLocationPlausible(location);
         if (verbose && !quiet)
-            //Log.i(getClass().getSimpleName(), location.toString() + (plausible ? " -> plausible" : " -> not plausible"));
+            Log.i(getClass().getSimpleName(), location.toString() + (plausible ? " -> plausible" : " -> not plausible"));
 
         if (!allowMockLocations && !plausible) {
             if (listener != null) listener.onMockLocationsDetected(onGoToDevSettingsFromView,
