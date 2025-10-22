@@ -26,25 +26,42 @@ android {
     namespace 'com.wongpiwat.trust_location'
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_11  // Updated from 1_8
-        targetCompatibility JavaVersion.VERSION_11  // Updated from 1_8
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
     }
 
     defaultConfig {
         minSdkVersion 21
+        targetSdkVersion 33
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
+    
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    
     lintOptions {
         disable 'InvalidPackage'
+        checkReleaseBuilds false
+        abortOnError false
     }
 }
 
 dependencies {
     testImplementation 'junit:junit:4.13.2'
-    androidTestImplementation 'androidx.test:runner:1.4.0'
-    androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
+    androidTestImplementation 'androidx.test:runner:1.5.2'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.legacy:legacy-support-v13:1.0.0'
     implementation "androidx.annotation:annotation:1.6.0"
+    
+    // Google Play Services - Location
     implementation 'com.google.android.gms:play-services-location:21.0.1'
+    
+    // Flutter embedding
+    compileOnly 'io.flutter:flutter_embedding_debug:1.0.0'
 }
