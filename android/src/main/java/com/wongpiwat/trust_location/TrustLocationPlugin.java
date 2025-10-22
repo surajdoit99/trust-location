@@ -1,6 +1,11 @@
 package com.wongpiwat.trust_location;
 
+import android.content.Context;
+import android.content.DialogInterface;
+import android.view.View;
+
 import androidx.annotation.NonNull;
+
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.embedding.engine.plugins.activity.ActivityAware;
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
@@ -8,7 +13,7 @@ import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
-import io.flutter.plugin.common.PluginRegistry.Registrar;
+import io.flutter.plugin.common.PluginRegistry;
 
 /** TrustLocationPlugin */
 public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, ActivityAware {
@@ -25,7 +30,8 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
 
     // This static function is optional and equivalent to onAttachedToEngine. It supports the old
     // pre-Flutter-1.12 Android projects.
-    public static void registerWith(Registrar registrar) {
+    @SuppressWarnings("deprecation")
+    public static void registerWith(PluginRegistry.Registrar registrar) {
         final MethodChannel channel = new MethodChannel(registrar.messenger(), CHANNEL);
         TrustLocationPlugin plugin = new TrustLocationPlugin();
         channel.setMethodCallHandler(plugin);
