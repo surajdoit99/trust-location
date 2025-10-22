@@ -159,23 +159,36 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
 
     private boolean isMockLocationEnabledInSettings() {
     try {
-        // Use AppOpsManager (valid from Android 6+)
         AppOpsManager appOps = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
         if (appOps == null) return false;
 
         List<ApplicationInfo> apps = context.getPackageManager().getInstalledApplications(0);
         for (ApplicationInfo app : apps) {
-            if (app.packageName.equals(context.getPackageName())) continue; // Skip self
+            String pkg = app.packageName;
+            if (pkg.equals(context.getPackageName())) continue; // Skip self
+            if (pkg.equals("com.google.android.gms")) continue; // Skip Play Services (fused)
 
             try {
-                int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_MOCK_LOCATION, app.uid, app.packageName);
+                int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_MOCK_LOCATION, app.uid, pkg);
                 if (mode == AppOpsManager.MODE_ALLOWED) {
-                    Log.i("TrustLocation", "Mock location app detected: " + app.packageName);
+                    Log.i("TrustLocation", "Mock location app detected: " + pkg);
                     return true;
                 }
             } catch (Exception ignored) {
             }
         }
+
+        // Also check if this app itself is selected as the mock location app
+        int selfMode = appOps.checkOpNoThrow(
+            AppOpsManager.OPSTR_MOCK_LOCATION,
+            android.os.Process.myUid(),
+            context.getPackageName()
+        );
+        if (selfMode == AppOpsManager.MODE_ALLOWED) {
+            Log.i("TrustLocation", "This app is selected as mock location provider");
+            return true;
+        }
+
     } catch (Exception e) {
         Log.e("TrustLocation", "Error checking mock location apps via AppOpsManager", e);
     }
@@ -185,90 +198,116 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
 
 
     private boolean hasTestProviders() {
-        try {
-            LocationManager locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
-            if (locationManager == null) {
-                return false;
-            }
+    try {
+        LocationManager locationManager =
+                (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
+        if (locationManager == null) {
+            return false;
+        }
 
-            // Check for test providers in the list of all providers
-            List<String> allProviders = locationManager.getAllProviders();
-            for (String provider : allProviders) {
-                if (provider.toLowerCase().contains("test") || 
-                    provider.toLowerCase().contains("mock") ||
-                    provider.equals("fused") || // Some mock apps use "fused" provider
-                    provider.contains("gps") && provider.length() > 3) { // Modified GPS providers
-                    Log.i("TrustLocation", "Suspicious provider found: " + provider);
+        // Check for explicitly added test or mock providers only
+        List<String> allProviders = locationManager.getAllProviders();
+        for (String provider : allProviders) {
+            String lower = provider.toLowerCase();
+            // Ignore "fused" — it's the normal Play Services provider
+            if (lower.contains("test") || lower.contains("mock")) {
+                Log.i("TrustLocation", "Suspicious provider found: " + provider);
+                return true;
+            }
+        }
+
+        // Only attempt to add a test provider on pre-Android 12 devices
+        // (later versions block it safely)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            try {
+                locationManager.addTestProvider(
+                        "test_provider_check", false, false, false,
+                        false, true, true, true, 0, 5);
+                locationManager.removeTestProvider("test_provider_check");
+                // If this worked AND mock location is enabled in settings, confirm mock
+                if (isMockLocationEnabledInSettings()) {
+                    Log.i("TrustLocation", "Test provider addition succeeded while mock enabled");
                     return true;
                 }
-            }
-
-            // Check if test provider can be added (indicates mock location capability)
-            try {
-                // This will throw SecurityException if mock locations are not allowed
-                locationManager.addTestProvider("test_provider_check", false, false, false, false, true, true, true, 0, 5);
-                locationManager.removeTestProvider("test_provider_check");
-                Log.i("TrustLocation", "Test provider can be added - mock location likely enabled");
-                return true;
+                Log.i("TrustLocation", "Test provider addition succeeded but mock not enabled");
             } catch (SecurityException e) {
-                // SecurityException means mock locations are not allowed - this is good
-                Log.i("TrustLocation", "Cannot add test provider - mock location likely disabled");
+                // Expected when mock locations are not allowed
+                Log.i("TrustLocation", "Cannot add test provider - mock likely disabled");
             } catch (Exception e) {
                 Log.e("TrustLocation", "Error testing provider addition", e);
             }
-
-        } catch (Exception e) {
-            Log.e("TrustLocation", "Error checking test providers", e);
         }
-        return false;
+
+    } catch (Exception e) {
+        Log.e("TrustLocation", "Error checking test providers", e);
     }
+
+    return false;
+}
+
 
     private boolean hasMockLocationsFromProviders() {
-        try {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) 
-                    != PackageManager.PERMISSION_GRANTED) {
-                Log.i("TrustLocation", "No location permission, skipping location-based mock detection");
-                return false;
-            }
+    try {
+        // Step 1: Require fine location permission
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+            Log.i("TrustLocation", "No location permission, skipping mock detection");
+            return false;
+        }
 
-            LocationManager locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
-            if (locationManager == null) {
-                return false;
-            }
+        LocationManager locationManager =
+                (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
+        if (locationManager == null) {
+            return false;
+        }
 
-            // Check last known locations from different providers
-            String[] providers = {LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER};
-            
-            for (String provider : providers) {
-                try {
-                    Location location = locationManager.getLastKnownLocation(provider);
-                    if (location != null) {
-                        // Check if location is from mock provider (API 18+)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
-                            if (location.isFromMockProvider()) {
-                                Log.i("TrustLocation", "Mock location detected from provider: " + provider);
-                                return true;
-                            }
-                        }
-                        
-                        // Additional checks for suspicious locations
-                        if (isSuspiciousLocation(location)) {
-                            Log.i("TrustLocation", "Suspicious location from provider: " + provider);
+        // Step 2: Loop through standard providers only
+        String[] providers = {
+                LocationManager.GPS_PROVIDER,
+                LocationManager.NETWORK_PROVIDER,
+                LocationManager.PASSIVE_PROVIDER
+        };
+
+        for (String provider : providers) {
+            try {
+                Location location = locationManager.getLastKnownLocation(provider);
+                if (location == null) continue;
+
+                // Step 3: Use native mock detection API (reliable from Android 4.3+)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+                    if (location.isFromMockProvider()) {
+                        // Extra check: developer mock setting must also be on
+                        if (isMockLocationEnabledInSettings()) {
+                            Log.i("TrustLocation",
+                                    "Confirmed mock location from provider: " + provider);
                             return true;
+                        } else {
+                            Log.w("TrustLocation",
+                                    "Mock flag true but developer setting off, ignoring (fused GPS)");
                         }
                     }
-                } catch (SecurityException e) {
-                    Log.w("TrustLocation", "No permission to access location from provider: " + provider);
-                } catch (Exception e) {
-                    Log.e("TrustLocation", "Error checking location from provider: " + provider, e);
                 }
-            }
 
-        } catch (Exception e) {
-            Log.e("TrustLocation", "Error checking locations from providers", e);
+                // Step 4: Manual heuristics for suspicious coordinates
+                if (isSuspiciousLocation(location)) {
+                    Log.i("TrustLocation", "Suspicious location from provider: " + provider);
+                    return true;
+                }
+
+            } catch (SecurityException e) {
+                Log.w("TrustLocation", "Permission issue with provider: " + provider);
+            } catch (Exception e) {
+                Log.e("TrustLocation", "Error checking provider: " + provider, e);
+            }
         }
-        return false;
+
+    } catch (Exception e) {
+        Log.e("TrustLocation", "Error checking locations from providers", e);
     }
+
+    return false;
+}
+
 
     private boolean isSuspiciousLocation(Location location) {
         if (location == null) return false;
