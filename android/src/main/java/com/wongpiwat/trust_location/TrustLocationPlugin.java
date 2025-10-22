@@ -44,6 +44,15 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
             }
             return false;
         });
+
+        // Add activity result listener for location settings
+        binding.addActivityResultListener((requestCode, resultCode, data) -> {
+            if (locationAssistantListener != null && locationAssistantListener.getAssistant() != null) {
+                locationAssistantListener.getAssistant().onActivityResult(requestCode, resultCode);
+                return true;
+            }
+            return false;
+        });
     }
 
     @Override
@@ -63,6 +72,7 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
         }
         if (activityBinding != null) {
             activityBinding.removeRequestPermissionsResultListener((requestCode, permissions, grantResults) -> false);
+            activityBinding.removeActivityResultListener((requestCode, resultCode, data) -> false);
         }
     }
 
@@ -75,34 +85,72 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
 
         switch (call.method) {
             case "isMockLocation":
-                if (locationAssistantListener.isMockLocationsDetected()) {
-                    result.success(true);
-                } else if (locationAssistantListener.getLatitude() != null && locationAssistantListener.getLongitude() != null) {
-                    result.success(false);
-                } else {
-                    result.success(true);
-                }
+                handleIsMockLocation(result);
                 break;
             case "getLatitude":
-                if (locationAssistantListener.getLatitude() != null) {
-                    result.success(locationAssistantListener.getLatitude());
-                } else {
-                    result.success(null);
-                }
+                handleGetLatitude(result);
                 break;
             case "getLongitude":
-                if (locationAssistantListener.getLongitude() != null) {
-                    result.success(locationAssistantListener.getLongitude());
-                } else {
-                    result.success(null);
-                }
+                handleGetLongitude(result);
                 break;
             case "getPlatformVersion":
                 result.success("Android " + android.os.Build.VERSION.RELEASE);
                 break;
+            case "start":
+                handleStart(result);
+                break;
+            case "stop":
+                handleStop(result);
+                break;
             default:
                 result.notImplemented();
                 break;
+        }
+    }
+
+    private void handleIsMockLocation(@NonNull Result result) {
+        if (locationAssistantListener.isMockLocationsDetected()) {
+            result.success(true);
+        } else if (locationAssistantListener.getLatitude() != null && locationAssistantListener.getLongitude() != null) {
+            result.success(false);
+        } else {
+            result.success(true);
+        }
+    }
+
+    private void handleGetLatitude(@NonNull Result result) {
+        String latitude = locationAssistantListener.getLatitude();
+        if (latitude != null) {
+            result.success(latitude);
+        } else {
+            result.success(null);
+        }
+    }
+
+    private void handleGetLongitude(@NonNull Result result) {
+        String longitude = locationAssistantListener.getLongitude();
+        if (longitude != null) {
+            result.success(longitude);
+        } else {
+            result.success(null);
+        }
+    }
+
+    private void handleStart(@NonNull Result result) {
+        if (locationAssistantListener.getAssistant() != null) {
+            locationAssistantListener.getAssistant().start();
+            result.success(true);
+        } else {
+            result.error("UNAVAILABLE", "Location assistant not available", null);
+        }
+    }
+
+    private void handleStop(@NonNull Result result) {
+        if (locationAssistantListener.getAssistant() != null) {
+            locationAssistantListener.getAssistant().stop();
+            result.success(true);
+        } else {
+            result.error("UNAVAILABLE", "Location assistant not available", null);
         }
     }
 }
@@ -116,7 +164,6 @@ class LocationAssistantListener implements LocationAssistant.Listener {
     public LocationAssistantListener(android.app.Activity activity, Context context) {
         assistant = new LocationAssistant(activity, context, this, LocationAssistant.Accuracy.HIGH, 5000, false);
         assistant.setVerbose(true);
-        assistant.start();
     }
 
     @Override
@@ -124,26 +171,38 @@ class LocationAssistantListener implements LocationAssistant.Listener {
         if (assistant != null) {
             assistant.requestAndPossiblyExplainLocationPermission();
         }
+        android.util.Log.i("TrustLocation", "onNeedLocationPermission: Permission required");
     }
 
     @Override
     public void onExplainLocationPermission() {
-        android.util.Log.i("TrustLocation", "onExplainLocationPermission: ");
+        android.util.Log.i("TrustLocation", "onExplainLocationPermission: Explain why permission is needed");
     }
 
     @Override
     public void onLocationPermissionPermanentlyDeclined(View.OnClickListener fromView, DialogInterface.OnClickListener fromDialog) {
-        android.util.Log.i("TrustLocation", "onLocationPermissionPermanentlyDeclined: ");
+        android.util.Log.i("TrustLocation", "onLocationPermissionPermanentlyDeclined: Permission permanently denied");
+        // You could show a dialog here to guide user to app settings
+        if (fromDialog != null) {
+            fromDialog.onClick(null, DialogInterface.BUTTON_POSITIVE);
+        }
     }
 
     @Override
     public void onNeedLocationSettingsChange() {
-        android.util.Log.i("TrustLocation", "LocationSettingsStatusCodes.RESOLUTION_REQUIRED: Please Turn on GPS location service.");
+        android.util.Log.i("TrustLocation", "onNeedLocationSettingsChange: Location settings need to be changed");
+        if (assistant != null) {
+            assistant.changeLocationSettings();
+        }
     }
 
     @Override
     public void onFallBackToSystemSettings(View.OnClickListener fromView, DialogInterface.OnClickListener fromDialog) {
-        android.util.Log.i("TrustLocation", "onFallBackToSystemSettings: ");
+        android.util.Log.i("TrustLocation", "onFallBackToSystemSettings: Need to open system settings");
+        // Open system location settings
+        if (fromView != null) {
+            fromView.onClick(null);
+        }
     }
 
     @Override
@@ -152,16 +211,22 @@ class LocationAssistantListener implements LocationAssistant.Listener {
         latitude = String.valueOf(location.getLatitude());
         longitude = String.valueOf(location.getLongitude());
         isMockLocationsDetected = false;
+        android.util.Log.i("TrustLocation", "onNewLocationAvailable: " + latitude + ", " + longitude);
     }
 
     @Override
     public void onMockLocationsDetected(View.OnClickListener fromView, DialogInterface.OnClickListener fromDialog) {
         isMockLocationsDetected = true;
+        android.util.Log.w("TrustLocation", "onMockLocationsDetected: Mock location detected");
+        // You could show a warning dialog here
+        if (fromDialog != null) {
+            fromDialog.onClick(null, DialogInterface.BUTTON_POSITIVE);
+        }
     }
 
     @Override
     public void onError(LocationAssistant.ErrorType type, String message) {
-        android.util.Log.i("TrustLocation", "Error: " + message);
+        android.util.Log.e("TrustLocation", "onError: " + type + " - " + message);
     }
 
     public String getLatitude() {
