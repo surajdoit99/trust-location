@@ -2,6 +2,7 @@ package com.wongpiwat.trust_location;
 
 import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager; // ADD THIS IMPORT
 import android.location.LocationManager;
 import android.os.Build;
 import android.provider.Settings;
@@ -141,26 +142,7 @@ public class TrustLocationPlugin implements FlutterPlugin, MethodCallHandler, Ac
             }
         }
 
-        // Method 2: Check for test providers in location manager
-        try {
-            LocationManager locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
-            
-            // Check if test provider is enabled (doesn't require location permission)
-            if (locationManager != null) {
-                // This method doesn't require location permission
-                boolean hasTestProvider = locationManager.getAllProviders().contains(LocationManager.GPS_PROVIDER) &&
-                                         locationManager.getProvider(LocationManager.GPS_PROVIDER) != null;
-                
-                if (hasTestProvider) {
-                    // Additional check for common mock location indicators
-                    return isDeviceSuspectForMockLocation();
-                }
-            }
-        } catch (Exception e) {
-            Log.e("TrustLocation", "Error checking location providers", e);
-        }
-
-        // Method 3: Check for common virtual/emulator indicators
+        // Method 2: Check for common virtual/emulator indicators
         return isDeviceSuspectForMockLocation();
     }
 
